@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"git commit\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\nset -e\ninput=$(cat)\n\necho '[Hook] Pre-commit checks starting...' >&2\n\n# Run ruff format check\necho '[Hook] Running ruff format check...' >&2\nif ! uv run ruff format src/ tests/ --check 2>&1; then\n  echo '[Hook] BLOCKED: Code is not formatted. Run: uv run ruff format src/ tests/' >&2\n  exit 1\nfi\n\n# Run ruff lint\necho '[Hook] Running ruff lint...' >&2\nif ! uv run ruff check src/ tests/ 2>&1; then\n  echo '[Hook] BLOCKED: Lint errors found. Run: uv run ruff check src/ tests/ --fix' >&2\n  exit 1\nfi\n\n# Run mypy\necho '[Hook] Running mypy type check...' >&2\nif ! uv run mypy src/ 2>&1; then\n  echo '[Hook] BLOCKED: Type errors found. Fix mypy errors before committing.' >&2\n  exit 1\nfi\n\n# Run tests\necho '[Hook] Running tests...' >&2\nif ! uv run pytest tests/ -q 2>&1; then\n  echo '[Hook] BLOCKED: Tests failed. Fix failing tests before committing.' >&2\n  exit 1\nfi\n\necho '[Hook] All pre-commit checks passed!' >&2\necho \"$input\""
+          }
+        ],
+        "description": "Pre-commit: Run ruff, mypy, and tests before git commit"
+      },
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"git push\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\necho '[Hook] Review changes before push...' >&2\necho '[Hook] Running coverage check...' >&2\nif ! uv run pytest --cov=src --cov-fail-under=95 -q 2>&1; then\n  echo '[Hook] WARNING: Coverage below 95%. Consider adding more tests.' >&2\nfi\necho \"$input\""
+          }
+        ],
+        "description": "Pre-push: Check test coverage"
+      },
+      {
+        "matcher": "tool == \"Write\" && tool_input.file_path matches \"\\\\.py$\" && !(tool_input.content matches \"from __future__ import annotations\")",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\necho \"[Hook] WARNING: Missing 'from __future__ import annotations' in $file_path\" >&2\necho '[Hook] Add this import at the top of the file.' >&2\necho \"$input\""
+          }
+        ],
+        "description": "Warn if Python file missing future annotations import"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "tool == \"Edit\" && tool_input.file_path matches \"\\\\.py$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  # Run ruff on the edited file\n  echo \"[Hook] Running ruff on $file_path...\" >&2\n  uv run ruff check \"$file_path\" 2>&1 | head -10 >&2 || true\n  \n  # Run mypy on the edited file\n  echo \"[Hook] Running mypy on $file_path...\" >&2\n  uv run mypy \"$file_path\" 2>&1 | head -10 >&2 || true\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Auto-check Python files with ruff and mypy after edits"
+      },
+      {
+        "matcher": "tool == \"Edit\" && tool_input.file_path matches \"\\\\.py$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  # Warn about print statements\n  print_stmts=$(grep -n \"^[^#]*print(\" \"$file_path\" 2>/dev/null || true)\n  \n  if [ -n \"$print_stmts\" ]; then\n    echo \"[Hook] WARNING: print() found in $file_path\" >&2\n    echo \"$print_stmts\" | head -5 >&2\n    echo '[Hook] Use structlog for logging instead of print()' >&2\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Warn about print statements in Python files"
+      },
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"gh pr create\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\noutput=$(echo \"$input\" | jq -r '.tool_output.output // \"\"')\npr_url=$(echo \"$output\" | grep -oE 'https://github.com/[^/]+/[^/]+/pull/[0-9]+')\n\nif [ -n \"$pr_url\" ]; then\n  echo \"[Hook] PR created: $pr_url\" >&2\n  repo=$(echo \"$pr_url\" | sed -E 's|https://github.com/([^/]+/[^/]+)/pull/[0-9]+|\\1|')\n  pr_num=$(echo \"$pr_url\" | sed -E 's|.*/pull/([0-9]+)|\\1|')\n  echo \"[Hook] To review: gh pr view $pr_num --repo $repo\" >&2\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Log PR URL after creation"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\n\nif git rev-parse --git-dir > /dev/null 2>&1; then\n  modified_files=$(git diff --name-only HEAD 2>/dev/null | grep -E '\\.py$' || true)\n  \n  if [ -n \"$modified_files\" ]; then\n    echo '[Hook] Session ending - checking modified Python files...' >&2\n    \n    has_issues=false\n    while IFS= read -r file; do\n      if [ -f \"$file\" ]; then\n        # Check for print statements\n        if grep -q \"^[^#]*print(\" \"$file\" 2>/dev/null; then\n          echo \"[Hook] WARNING: print() found in $file\" >&2\n          has_issues=true\n        fi\n        \n        # Check for missing future annotations\n        if ! grep -q \"from __future__ import annotations\" \"$file\" 2>/dev/null; then\n          echo \"[Hook] WARNING: Missing future annotations in $file\" >&2\n          has_issues=true\n        fi\n      fi\n    done <<< \"$modified_files\"\n    \n    if [ \"$has_issues\" = true ]; then\n      echo '[Hook] Fix issues before committing' >&2\n    fi\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Final audit of modified Python files before session ends"
+      }
+    ]
+  }
+}

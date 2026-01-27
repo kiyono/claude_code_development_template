@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(make:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(git:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(pwd:*)",
+      "WebFetch(domain:www.sakura.ad.jp)",
+      "WebFetch(domain:docs.astral.sh)"
+    ],
+    "deny": []
+  }
+}
