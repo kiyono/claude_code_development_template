@@ -11,8 +11,15 @@
       "Bash(ls:*)",
       "Bash(pwd:*)",
       "WebFetch(domain:www.sakura.ad.jp)",
-      "WebFetch(domain:docs.astral.sh)"
+      "WebFetch(domain:docs.astral.sh)",
+      "Bash(test:*)",
+      "Bash(wc:*)"
     ],
     "deny": []
-  }
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.js"
+  },
+  "plansDirectory": "docs/plans"
 }

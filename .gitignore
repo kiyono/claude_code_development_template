@@ -93,6 +93,8 @@ MANIFEST
 
 # Documentation build
 docs/_build/
+docs/plans/
+!docs/plans/.gitkeep
 site/
 
 # Secrets (never commit)
